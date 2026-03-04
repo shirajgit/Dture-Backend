@@ -4,14 +4,13 @@
  import debateSchema from "../models/debate.model.js";
  import authMiddleware from "../middleware/auth.js";
  import  multer  from "multer";
- 
- 
+ import uploadFile from "../services/storage.service.js";
+  
 import dotenv from "dotenv";
-import ImageKit from "@imagekit/nodejs";
+ 
 
 dotenv.config();
-  
- const  router = express();
+  const router = express.Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -22,29 +21,54 @@ const upload = multer({
   },
 });
 
-// POST /upload -> returns { url }
-router.post("/create", upload.single("file"), async (req, res) => {
+
+router.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: "File missing" });
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file" });
+    }
 
-    const fileBase64 = req.file.buffer.toString("base64");
+    const base64 = req.file.buffer.toString("base64");
+    const result = await uploadFile(base64, req.file.originalname);
 
-    const result = await ImageKit.upload({
-      file: fileBase64,
-      fileName: `${Date.now()}-${req.file.originalname}`,
-      folder: "/debates",          // optional
-      useUniqueFileName: true,     // optional
-    });
-
-    return res.status(200).json({
-      success: true,
-      url: result.url,             // use this in frontend
-      fileId: result.fileId,       // optional
-    });
+    return res.json({ success: true, url: result.url });
   } catch (err) {
+    console.error("UPLOAD ERROR:", err);
     return res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
+// POST /upload -> returns { url }
+router.post("/create", async (req, res) => {
+  try {
+    const { name, description, duration, image, user, id } = req.body;
+
+    let expire = 1;
+    if (duration === "7 Days") expire = 7;
+    else if (duration === "3 Days") expire = 3;
+
+    const expiresAt = new Date(Date.now() + expire * 24 * 60 * 60 * 1000);
+
+    const debate = await debateSchema.create({
+      id,
+      name,
+      description,
+      image,      // ImageKit URL here
+      duration,
+      user,
+      expiresAt,
+    });
+
+    return res.status(201).json({ success: true, debate });
+  } catch (err) {
+    console.error("CREATE ERROR:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+
 
 router.get("/debates", async (req, res) => {
    try {

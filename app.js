@@ -12,8 +12,9 @@ const app = express();
 
 connectDB();
 
-app.use(express.json());
 app.use(cors());
+app.use(express.json({ limit: "10mb" })); // ✅ parse JSON
+app.use(express.urlencoded({ extended: true }));
 
 app.get('/', (req, res) => {
   res.send('Hello World!');
