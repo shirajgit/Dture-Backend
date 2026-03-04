@@ -2,9 +2,12 @@
  import express from "express";
  import deletedDebateSchema from "../models/DeletedDebate.js";
  import debateSchema from "../models/debate.model.js";
-import authMiddleware from "../middleware/auth.js";
+ import authMiddleware from "../middleware/auth.js";
+ import  multer  from "multer";
+ 
  
 import dotenv from "dotenv";
+import ImageKit from "@imagekit/nodejs";
 
 dotenv.config();
   
@@ -26,7 +29,7 @@ router.post("/create", upload.single("file"), async (req, res) => {
 
     const fileBase64 = req.file.buffer.toString("base64");
 
-    const result = await imagekit.upload({
+    const result = await ImageKit.upload({
       file: fileBase64,
       fileName: `${Date.now()}-${req.file.originalname}`,
       folder: "/debates",          // optional
