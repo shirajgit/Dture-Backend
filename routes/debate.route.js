@@ -10,35 +10,38 @@ dotenv.config();
   
  const  router = express();
 
-
-router.post("/create", async (req, res) => {
-  try {
-    const { name, description, duration, image, user,id } = req.body;
-     let expire = 1
-
-    if(duration === "7 Days"){
-      expire = 7 } else if(duration === "3 Days"){ expire = 3} 
-
-    const expiresAt = new Date(
-      Date.now() + expire * 24 * 60 * 60 * 1000
-    );
-
-    const debate = await debateSchema.create({
-      id,
-      name,
-      description,
-      image,
-      duration,
-      user,
-      expiresAt,
-    });
-
-    res.status(201).json({ success: true, debate });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    const ok = file.mimetype.startsWith("image/");
+    cb(ok ? null : new Error("Only image files are allowed"), ok);
+  },
 });
 
+// POST /upload -> returns { url }
+router.post("/create", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: "File missing" });
+
+    const fileBase64 = req.file.buffer.toString("base64");
+
+    const result = await imagekit.upload({
+      file: fileBase64,
+      fileName: `${Date.now()}-${req.file.originalname}`,
+      folder: "/debates",          // optional
+      useUniqueFileName: true,     // optional
+    });
+
+    return res.status(200).json({
+      success: true,
+      url: result.url,             // use this in frontend
+      fileId: result.fileId,       // optional
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 router.get("/debates", async (req, res) => {
    try {
