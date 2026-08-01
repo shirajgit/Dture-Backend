@@ -1,39 +1,30 @@
 import cron from "node-cron";
- import debateSchema from "../models/debate.model.js";
-import DeletedDebate from "../models/DeletedDebate.js";
+import Debate from "../models/debate.model.js";
+import { AUTO_DEBATE_CONFIG } from "../config/autoDebate.config.js";
 
-cron.schedule("*/1 * * * *", async () => {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Every 10 minutes:
+//  1. Mark debates whose duration elapsed as `ended` (they stay visible).
+//  2. Permanently delete debates that ended more than `removeAfterEndDays` ago.
+cron.schedule("*/10 * * * *", async () => {
   try {
     const now = new Date();
 
-    const expiredDebates = await  debateSchema.find({
-      expiresAt: { $lte: now },
-    });
-
-    if (expiredDebates.length === 0) return;
-
-    await DeletedDebate.insertMany(
-      expiredDebates.map(d => ({
-        originalId: d._id,
-        name: d.name,
-        description: d.description,
-        image: d.image,
-        duration: d.duration,
-        user: d.user,
-        agree: d.agree,
-        disagree: d.disagree,
-        expiredAt: d.expiresAt,
-        disagreeCom: d.disagreeCom ,
-        agreeCom: d.agreeCom
-      }))
+    const justEnded = await Debate.updateMany(
+      { expiresAt: { $lte: now }, ended: { $ne: true } },
+      { $set: { ended: true, endedAt: now } }
     );
 
-    await  debateSchema.deleteMany({
-      _id: { $in: expiredDebates.map(d => d._id) },
+    const cutoff = new Date(now.getTime() - AUTO_DEBATE_CONFIG.removeAfterEndDays * DAY_MS);
+    const removed = await Debate.deleteMany({
+      ended: true,
+      endedAt: { $lte: cutoff },
     });
 
-    console.log(`🗑️ Archived ${expiredDebates.length} expired debates`);
+    if (justEnded.modifiedCount) console.log(`⏹️  Ended ${justEnded.modifiedCount} debates`);
+    if (removed.deletedCount) console.log(`🗑️  Deleted ${removed.deletedCount} old debates`);
   } catch (err) {
-    console.error("❌ Cron error:", err.message);
+    console.error("❌ Expire cron error:", err.message);
   }
 });

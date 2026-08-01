@@ -6,6 +6,8 @@ import connectDB from "./config/db.js";
 import dotenv from "dotenv";
 import userRouter from "./routes/user.route.js";  
 import "./cron/expireDebates.js";
+import "./cron/generateDebates.js";
+import "./cron/autoEngage.js";
 
 dotenv.config();
 const app = express();
