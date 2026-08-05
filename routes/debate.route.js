@@ -1,16 +1,32 @@
  import cors from "cors";
  import express from "express";
+ import mongoose from "mongoose";
  import deletedDebateSchema from "../models/DeletedDebate.js";
  import debateSchema from "../models/debate.model.js";
  import authMiddleware from "../middleware/auth.js";
  import  multer  from "multer";
  import uploadFile from "../services/storage.service.js";
-  
+
 import dotenv from "dotenv";
- 
+
 
 dotenv.config();
   const router = express.Router();
+
+// Lazily flip any overdue debates to `ended` on read, so ending never
+// depends on the every-10-min cron actually being awake (the Render free
+// tier sleeps). This mirrors what cron/expireDebates.js does.
+async function endOverdueDebates() {
+  const now = new Date();
+  await debateSchema.updateMany(
+    { expiresAt: { $lte: now }, ended: { $ne: true } },
+    { $set: { ended: true, endedAt: now } }
+  );
+}
+
+// A debate is over if it's flagged ended OR its expiry time has passed.
+const isDebateEnded = (d) =>
+  d.ended === true || (d.expiresAt && new Date(d.expiresAt) <= new Date());
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -70,36 +86,94 @@ router.post("/create", async (req, res) => {
 
 
 
+// Active debates only (ended ones are excluded so they stop showing as "live").
 router.get("/debates", async (req, res) => {
    try {
-     const debates = await debateSchema.find();
- 
+     await endOverdueDebates();
+     const debates = await debateSchema.find({ ended: { $ne: true } });
+
      return res.status(200).json({
        success: true,
        debates,
      });
    } catch (err) {
      console.error("GET /debates error:", err);
- 
+
      return res.status(500).json({
        success: false,
        message: err.message,
      });
    }
  });
- 
 
+// Ended debates — served from the real Debate collection ({ ended: true }),
+// not the never-populated DeletedDebate collection.
+ router.get("/ended-debates", async (req, res) => {
+   try {
+     await endOverdueDebates();
+     const debates = await debateSchema
+       .find({ ended: true })
+       .sort({ endedAt: -1 });
+
+     return res.status(200).json({
+       success: true,
+       debates,
+     });
+   } catch (err) {
+     console.error("GET /ended-debates error:", err);
+
+     return res.status(500).json({
+       success: false,
+       message: err.message,
+     });
+   }
+ });
+
+// A single ended debate by Mongo _id or numeric id.
+ router.get("/ended-debates/:id", async (req, res) => {
+   try {
+     await endOverdueDebates();
+     let debate = null;
+     if (mongoose.isValidObjectId(req.params.id)) {
+       debate = await debateSchema.findById(req.params.id);
+     }
+     if (!debate) {
+       debate = await debateSchema.findOne({ id: Number(req.params.id) });
+     }
+     if (!debate) return res.status(404).json({ message: "Not found" });
+     return res.status(200).json(debate);
+   } catch (err) {
+     console.error("GET /ended-debates/:id error:", err);
+     return res.status(500).json({ success: false, message: err.message });
+   }
+ });
+
+// A single debate by numeric id, active OR ended (used by the debate page,
+// so it can show an "ended" state instead of "no debate found").
+ router.get("/debate/:id", async (req, res) => {
+   try {
+     await endOverdueDebates();
+     const debate = await debateSchema.findOne({ id: Number(req.params.id) });
+     if (!debate) return res.status(404).json({ success: false, message: "Not found" });
+     return res.status(200).json({ success: true, debate });
+   } catch (err) {
+     console.error("GET /debate/:id error:", err);
+     return res.status(500).json({ success: false, message: err.message });
+   }
+ });
+
+// Kept for backwards-compat; the DeletedDebate collection is unused/empty.
  router.get("/delete-debates", async (req, res) => {
    try {
      const debates = await deletedDebateSchema.find();
- 
+
      return res.status(200).json({
        success: true,
        debates,
      });
    } catch (err) {
      console.error("GET /debates error:", err);
- 
+
      return res.status(500).json({
        success: false,
        message: err.message,
@@ -118,7 +192,11 @@ router.post("/debates/:id", async (req, res) => {
      if (!debate) {
        return res.status(404).json({ message: "Debate not found" });
      }
-   
+
+     if (isDebateEnded(debate)) {
+       return res.status(400).json({ message: "This debate has ended" });
+     }
+
      if (!debate.Voters.includes(voter)) {
        debate.Voters.push(voter);
       
@@ -156,6 +234,10 @@ router.put("/debates/:id/agree", authMiddleware, async (req, res) => {
   const debate = await debateSchema.findById(req.params.id);
   if (!debate) return res.status(404).json({ message: "Debate not found" });
 
+  if (isDebateEnded(debate)) {
+    return res.status(400).json({ message: "This debate has ended" });
+  }
+
   if (debate.Voters.includes(userId)) {
     return res.status(400).json({ message: "Already voted" });
   }
@@ -173,6 +255,10 @@ router.put("/debates/:id/disagree", authMiddleware, async (req, res) => {
 
   const debate = await debateSchema.findById(req.params.id);
   if (!debate) return res.status(404).json({ message: "Debate not found" });
+
+  if (isDebateEnded(debate)) {
+    return res.status(400).json({ message: "This debate has ended" });
+  }
 
   if (debate.Voters.includes(userId)) {
     return res.status(400).json({ message: "Already voted" });
@@ -193,7 +279,10 @@ router.put("/debates/:id/discommets",authMiddleware , async (req, res)=>{
   const debate = await debateSchema.findById(req.params.id);
   if (!debate) return res.status(404).json({ message: "Debate not found" });
 
- 
+  if (isDebateEnded(debate)) {
+    return res.status(400).json({ message: "This debate has ended" });
+  }
+
    debate.disagreeCom.push({
         user,
         commets,
@@ -211,7 +300,11 @@ router.put("/debates/:id/discommets",authMiddleware , async (req, res)=>{
 
   const debate = await debateSchema.findById(req.params.id);
   if (!debate) return res.status(404).json({ message: "Debate not found" });
-   
+
+  if (isDebateEnded(debate)) {
+    return res.status(400).json({ message: "This debate has ended" });
+  }
+
   debate.agreeCom.push({
         user,
          commets,
