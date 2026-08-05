@@ -19,7 +19,7 @@ app.use(express.json({ limit: "10mb" })); // ✅ parse JSON
 app.use(express.urlencoded({ extended: true }));
 
 app.get('/', (req, res) => {
-  res.send('Hello World!');
+  res.send('Hello World! this is the backend of Dture');
 });
 
 
