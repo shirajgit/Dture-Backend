@@ -1,6 +1,6 @@
 import axios from "axios";
 import dotenv from "dotenv";
-import { AUTO_DEBATE_CONFIG, pick } from "../config/autoDebate.config.js";
+import { AUTO_DEBATE_CONFIG, pick, randInt } from "../config/autoDebate.config.js";
 
 dotenv.config();
 
@@ -99,6 +99,37 @@ Return ONLY JSON:
   return (comments || [])
     .filter((c) => c && c.user && c.text)
     .map((c) => ({ user: String(c.user).trim(), commets: String(c.text).trim() }));
+}
+
+/**
+ * Build a batch of fake engagement (extra votes + AI comments) for one debate.
+ * Used both by the auto-engage cron and by the /ai-result route to boost
+ * low-activity debates. Comment generation is best-effort per side.
+ * @returns {Promise<{ extraAgree:number, extraDisagree:number,
+ *   agreeComments:Array, disagreeComments:Array }>}
+ */
+export async function generateEngagement({ name, description }) {
+  const { votesPerSide, commentsPerSide } = AUTO_DEBATE_CONFIG.engagement;
+
+  const agreeCount = randInt(commentsPerSide.min, commentsPerSide.max);
+  const disagreeCount = randInt(commentsPerSide.min, commentsPerSide.max);
+  const context = description || name;
+
+  const [agreeComments, disagreeComments] = await Promise.all([
+    generateComments({ name, description: context, stance: "agree", count: agreeCount }).catch(
+      () => []
+    ),
+    generateComments({ name, description: context, stance: "disagree", count: disagreeCount }).catch(
+      () => []
+    ),
+  ]);
+
+  return {
+    extraAgree: randInt(votesPerSide.min, votesPerSide.max),
+    extraDisagree: randInt(votesPerSide.min, votesPerSide.max),
+    agreeComments,
+    disagreeComments,
+  };
 }
 
 /**

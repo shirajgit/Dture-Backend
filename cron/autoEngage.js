@@ -1,33 +1,16 @@
 import cron from "node-cron";
 import Debate from "../models/debate.model.js";
-import { generateComments } from "../services/ai.service.js";
-import { AUTO_DEBATE_CONFIG, randInt } from "../config/autoDebate.config.js";
+import { generateEngagement } from "../services/ai.service.js";
+import { AUTO_DEBATE_CONFIG } from "../config/autoDebate.config.js";
 
-const { voteThreshold, votesPerSide, commentsPerSide } =
-  AUTO_DEBATE_CONFIG.engagement;
+const { voteThreshold } = AUTO_DEBATE_CONFIG.engagement;
 
 async function engage(debate) {
-  const agreeCount = randInt(commentsPerSide.min, commentsPerSide.max);
-  const disagreeCount = randInt(commentsPerSide.min, commentsPerSide.max);
-
-  // AI comments for both sides (best-effort; a failure just skips that side).
-  const [agreeComments, disagreeComments] = await Promise.all([
-    generateComments({
+  const { extraAgree, extraDisagree, agreeComments, disagreeComments } =
+    await generateEngagement({
       name: debate.name,
       description: debate.description,
-      stance: "agree",
-      count: agreeCount,
-    }).catch(() => []),
-    generateComments({
-      name: debate.name,
-      description: debate.description,
-      stance: "disagree",
-      count: disagreeCount,
-    }).catch(() => []),
-  ]);
-
-  const extraAgree = randInt(votesPerSide.min, votesPerSide.max);
-  const extraDisagree = randInt(votesPerSide.min, votesPerSide.max);
+    });
 
   debate.agree += extraAgree;
   debate.disagree += extraDisagree;
